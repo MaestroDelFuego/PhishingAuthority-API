@@ -1,4 +1,4 @@
-#PhishingAuthority-API
+**PhishingAuthority-API**
 
 This repository contains a set of security-related utility functions to help you manage passwords and assess URL safety. The features include:
 
@@ -8,24 +8,24 @@ Phishing Link Risk Calculator: Analyzes URLs for potential phishing or malicious
 
 Password Generator: Generates random, secure passwords with customizable length, and options to include numbers and special characters.
 
-#Features
+**Features**
 Password strength analysis with clear recommendations.
 
 Phishing link risk assessment based on URL components.
 
 Password generation with customizable complexity.
 
-#Requirements
+**Requirements**
 Node.js for running the code.
 
 JSON files for whitelistedDomains, suspiciousDomains, suspiciousKeywords, and blockedDomains for phishing risk calculation.
 
-#Usage
+**Usage**
 Check password strength and get recommendations.
 
 Analyze URLs for phishing risk.
 
 Generate random, secure passwords.
 
-#Note:
+**Note:**
 This repository is provided as-is. You must supply your own JSON data files for the phishing risk calculation functions to work properly.
