@@ -1,0 +1,8 @@
+{
+    "whitelistedDomains": [
+      "trusted.com",
+      "example.com",
+      "safewebsite.org"
+    ]
+  }
+  

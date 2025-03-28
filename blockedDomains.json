@@ -1,0 +1,8 @@
+{
+    "blockedDomains": [
+      "blocked.com",
+      "phishingsite.net",
+      "malicious-website.org"
+    ]
+  }
+  
