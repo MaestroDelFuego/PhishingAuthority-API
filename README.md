@@ -1,7 +1,7 @@
-# Phishing API
+# Phishing Authority API
 
 ## Overview
-Phishing API is a tool designed to analyze URLs and assess their risk of being associated with phishing attacks. It provides various checks, including domain age, DNS resolution, suspicious keywords, and more, to identify potentially harmful links.
+Phishing Authority API is a tool designed to analyze URLs and assess their risk of being associated with phishing attacks. It provides various checks, including domain age, DNS resolution, suspicious keywords, and more, to identify potentially harmful links.
 
 This API can be used to enhance the security of your application by evaluating links that users may click on and alerting them to any risks associated with those URLs. The API also provides password strength validation and a password generator feature.
 
