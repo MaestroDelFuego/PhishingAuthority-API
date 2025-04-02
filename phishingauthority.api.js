@@ -14,8 +14,8 @@ module.exports = {
 
 //Function to specify build date and version
 function version(){
-    const versionstring = '0.02';
-    const buildDateString  = '31/03/2025';
+    const versionstring = '0.03';
+    const buildDateString  = '02/04/2025';
     const [day, month, year] = buildDateString.split('/'); // Split the string into day, month, and year
     const buildDate = new Date(year, month - 1, day); // Month is 0-indexed, so subtract 1 from the month
 
@@ -159,6 +159,44 @@ function calculateCharsetSize(password) {
     if (/[^A-Za-z0-9]/.test(password)) size += 32;
     return size;
 }
+const axios = require('axios');
+
+// Function to check SSL certificate details using SSL Labs API
+async function checkSSL(domain) {
+    try {
+        const sslApiUrl = `https://api.ssllabs.com/api/v3/analyze?host=${domain}`;
+
+        // Fetch SSL certificate details from SSL Labs API
+        const response = await axios.get(sslApiUrl);
+
+        if (response.status === 200) {
+            const sslData = response.data;
+
+            if (sslData.status === 'READY') {
+                // SSL certificate details are available
+                const grade = sslData.grade || 'N/A';
+                const issues = sslData.certChain ? sslData.certChain.map(cert => cert.issuerLabel) : 'No certificate chain';
+                const isExpired = sslData.endpoints && sslData.endpoints[0].expireDate < Date.now() / 1000; // Check if certificate expired
+
+                return {
+                    grade,
+                    issues,
+                    isExpired,
+                };
+            } else if (sslData.status === 'ERROR') {
+                // Handle SSL Labs API error
+                return { error: 'SSL Labs API encountered an error analyzing the domain.' };
+            } else {
+                return { error: 'SSL certificate analysis is still in progress.' };
+            }
+        } else {
+            return { error: 'Failed to fetch SSL information from SSL Labs API.' };
+        }
+    } catch (error) {
+        console.error('Error fetching SSL data:', error);
+        return { error: 'Error fetching SSL data from the SSL Labs API.' };
+    }
+}
 
 // Calculate risk based on URL
 async function calculateRisk(url) {
@@ -296,7 +334,31 @@ async function calculateRisk(url) {
             reasons.push("URL contains percent-encoded characters (possible obfuscation).");
         }
         if (config.useWhitelist && whitelistedDomains.whitelistedDomains.includes(domain)) risk = 0; // Return -999 if the domain is whitelisted
+                
+        // Run SSL check for the domain
+        const sslResult = await checkSSL(domain);
 
+        let sslMessage = '';
+        let sslRisk = 0;
+        
+        if (sslResult.error) {
+            sslMessage = `Error fetching SSL info: ${sslResult.error}`;
+        } else {
+            if (sslResult.grade === 'A' || sslResult.grade === 'A+') {
+                sslMessage = 'The domain has a strong SSL certificate.';
+            } else {
+                sslRisk += 30; // Add risk if the certificate grade is not A
+                sslMessage = `The domain has an SSL grade of '${sslResult.grade}', which may not be secure.`;
+            }
+
+            if (sslResult.isExpired) {
+                sslRisk += 50; // Add higher risk if the certificate is expired
+                sslMessage += ' The SSL certificate has expired!';
+            }
+        }
+        // Add SSL risk score to the overall risk score
+        risk += sslRisk;
+        reasons.push(sslMessage);
         // Assign a proper risk message
         let safetyMessage = "";
         if (risk === 0) {
