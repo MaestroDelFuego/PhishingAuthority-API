@@ -5,7 +5,7 @@
     "useSuspiciousKeywords": true,
     "useBlockedDomains": true,
     "useDNSResolve": true,
-    "useDomainAgeCheck": true,
+    "useDomainAgeCheck": false,
     "useDnsProviderCheck": true,
     "useEncodedCharsCheck": true,
     "useMetaData": false,
