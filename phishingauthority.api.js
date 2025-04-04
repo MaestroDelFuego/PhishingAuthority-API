@@ -2,6 +2,7 @@ const fs = require('fs');
 const dns = require('dns'); // To check for domain details and verify valid domains
 const whois = require('whois'); // For domain age lookup
 const ogs = require('open-graph-scraper');
+const axios = require('axios');
 
 module.exports = { 
     version,
@@ -14,12 +15,67 @@ module.exports = {
 
 //Function to specify build date and version
 function version(){
-    const versionstring = '0.03';
-    const buildDateString  = '02/04/2025';
+    const versionstring = '0.04';
+    const buildDateString  = '04/04/2025';
     const [day, month, year] = buildDateString.split('/'); // Split the string into day, month, and year
     const buildDate = new Date(year, month - 1, day); // Month is 0-indexed, so subtract 1 from the month
 
     return `Phishing API Version: ${versionstring}\nBuild Date: ${buildDateString}\nAPI age: ${timeAgo(buildDate)}`;
+}
+
+async function checkSSL(domain) {
+    try {
+        const cleanDomain = domain.replace(/^https?:\/\//, '');
+
+        const sslApiUrl = `https://api.ssllabs.com/api/v3/analyze?host=${cleanDomain}&startNew=off&fromCache=on&maxAge=24`;
+        let attempts = 0;
+        const maxAttempts = 10;
+        const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        let response = await axios.get(sslApiUrl);
+        let status = response.data.status;
+
+        // Retry if status is IN_PROGRESS or DNS
+        while ((status === 'IN_PROGRESS' || status === 'DNS') && attempts < maxAttempts) {
+            attempts++;
+            console.log(`SSL Labs status: ${status}. Retrying attempt ${attempts}/${maxAttempts}...`);
+            await delay(3000); // wait 3 seconds before retrying
+            response = await axios.get(sslApiUrl);
+            status = response.data.status;
+        }
+
+        // Handle response based on final status
+        if (response.status !== 200) {
+            return { error: `Unexpected HTTP response code: ${response.status}` };
+        }
+
+        const sslData = response.data;
+
+        if (sslData.status === 'READY') {
+            const endpoint = sslData.endpoints?.[0];
+            if (!endpoint) return { error: 'No endpoint data available in SSL Labs result.' };
+
+            const grade = endpoint.grade || 'N/A';
+            const details = endpoint.details || {};
+            const cert = details.cert || {};
+
+            const isExpired = cert.notAfter ? cert.notAfter < (Date.now() / 1000) : false;
+
+            return {
+                grade,
+                issues: details.certChains?.[0]?.issues || 'No issues found',
+                isExpired,
+            };
+        } else if (sslData.status === 'ERROR') {
+            return { error: `SSL Labs error: ${sslData.statusMessage || 'Unspecified error.'}` };
+        } else {
+            return { error: `SSL Labs returned unexpected status: ${sslData.status}` };
+        }
+
+    } catch (error) {
+        console.error('Error fetching SSL data:', error.message || error);
+        return { error: `Error fetching SSL data: ${error.message || 'Unknown error occurred.'}` };
+    }
 }
 
 //Function to estimate API age
@@ -159,44 +215,6 @@ function calculateCharsetSize(password) {
     if (/[^A-Za-z0-9]/.test(password)) size += 32;
     return size;
 }
-const axios = require('axios');
-
-// Function to check SSL certificate details using SSL Labs API
-async function checkSSL(domain) {
-    try {
-        const sslApiUrl = `https://api.ssllabs.com/api/v3/analyze?host=${domain}`;
-
-        // Fetch SSL certificate details from SSL Labs API
-        const response = await axios.get(sslApiUrl);
-
-        if (response.status === 200) {
-            const sslData = response.data;
-
-            if (sslData.status === 'READY') {
-                // SSL certificate details are available
-                const grade = sslData.grade || 'N/A';
-                const issues = sslData.certChain ? sslData.certChain.map(cert => cert.issuerLabel) : 'No certificate chain';
-                const isExpired = sslData.endpoints && sslData.endpoints[0].expireDate < Date.now() / 1000; // Check if certificate expired
-
-                return {
-                    grade,
-                    issues,
-                    isExpired,
-                };
-            } else if (sslData.status === 'ERROR') {
-                // Handle SSL Labs API error
-                return { error: 'SSL Labs API encountered an error analyzing the domain.' };
-            } else {
-                return { error: 'SSL certificate analysis is still in progress.' };
-            }
-        } else {
-            return { error: 'Failed to fetch SSL information from SSL Labs API.' };
-        }
-    } catch (error) {
-        console.error('Error fetching SSL data:', error);
-        return { error: 'Error fetching SSL data from the SSL Labs API.' };
-    }
-}
 
 // Calculate risk based on URL
 async function calculateRisk(url) {
@@ -327,7 +345,6 @@ async function calculateRisk(url) {
                 reasons.push("Page content appears obfuscated (encoded characters detected).");
             }
         }
-
         // Check for encoded characters in the URL
         if (config.useEncodedCharsCheck && containsEncodedChars(url)) {
             risk += 20;
@@ -360,6 +377,8 @@ async function calculateRisk(url) {
         risk += sslRisk;
         reasons.push(sslMessage);
         // Assign a proper risk message
+        if (config.useWhitelist && whitelistedDomains.whitelistedDomains.includes(domain)) risk = 0; // Return -999 if the domain is whitelisted
+       
         let safetyMessage = "";
         if (risk === 0) {
             safetyMessage = "This URL appears to be safe!";
@@ -374,6 +393,8 @@ async function calculateRisk(url) {
         } else {
             safetyMessage = "Our service has encountered a problem attempting to provide a safety message, use the risk score to decide if you should proceed. Anything over 30 is reason to be extremely cautious!";
         }
+        if (config.useWhitelist && whitelistedDomains.whitelistedDomains.includes(domain)) safetyMessage = "This URL appears to be safe!"; // Return -999 if the domain is whitelisted
+        
         reasons.push(`Risk Score: ${risk}`);
         return {
             risk,
@@ -469,7 +490,24 @@ function checkDnsProvider(domain) {
                 resolve(false);
             } else {
                 // Add logic to check if addresses belong to a suspicious provider
-                const suspiciousIps = ['192.0.2.0', '203.0.113.0']; // Example suspicious IPs
+                const suspiciousIps = [                    
+                    '202.96.128.86', // China Telecom
+                    '77.88.8.8',     // Yandex.DNS (Basic)
+                    '209.244.0.3',   // Level 3 DNS
+                    '209.244.0.4',   // Level 3 DNS
+                    '8.26.56.26',    // Comodo Secure DNS
+                    '8.20.247.20',   // Comodo Secure DNS
+                    '198.153.192.40', // Norton ConnectSafe (Deprecated)
+                    '198.153.194.40', // Norton ConnectSafe (Deprecated)
+                    '216.146.35.35',  // DynDNS (Shut down)
+                    '216.146.36.36',  // DynDNS (Shut down)
+                    '202.12.27.33',   // APT DNS (Malicious redirection)
+                    '37.235.1.174',   // OpenDNS FamilyShield
+                    '156.154.70.1',   // Neustar UltraDNS
+                    '156.154.71.1',   // Neustar UltraDNS
+                    '64.6.64.6',      // Verisign Public DNS
+                    '64.6.65.6',      // Verisign Public DNS
+                ];
                 if (addresses.some(ip => suspiciousIps.includes(ip))) {
                     resolve(true);
                 } else {
@@ -479,7 +517,16 @@ function checkDnsProvider(domain) {
         });
     });
 }
-
+async function getRegion(ip) {
+    try {
+        // Use a geolocation API like ipinfo.io or ip-api
+        const response = await axios.get(`https://ipinfo.io/${ip}/json`);
+        return response.data.country; // Get country (or region, depending on API response)
+    } catch (error) {
+        console.error("Error fetching region:", error);
+        return null;
+    }
+}
 // Helper function to detect encoded characters in the page content
 function containsEncodedChars(content) {
     const encodedCharsPattern = /%[0-9A-Fa-f]{2}/g; // Pattern to match percent-encoded characters
@@ -502,29 +549,29 @@ async function getMetaData(url) {
                 // Remove HTML tags & extract plain text
                 const plainText = data.contents.replace(/<[^>]*>/g, " ") // Strip HTML tags
                                                .replace(/\s+/g, " ") // Normalize whitespace
-                                               .trim() // Remove leading/trailing whitespace
-                                               .toLowerCase(); // Convert to lowercase
-                
-                console.log("Extracted Text:", plainText);
+                                               .trim(); // Remove leading/trailing whitespace
+
+                console.log("Extracted Text:", plainText.slice(0, 300)); // Show snippet for debug
 
                 // Check for obfuscation (encoded characters, suspicious patterns)
-                if (containsEncodedChars(data.contents)) {
-                    console.log("Obfuscation detected! Adding risk score.");
-                    return { plainText, isObfuscated: true };
-                } else {
-                    return { plainText, isObfuscated: false };
+                const isObfuscated = containsEncodedChars(data.contents);
+                if (isObfuscated) {
+                    console.log("Obfuscation detected in page content.");
                 }
+
+                return {
+                    plainText,
+                    isObfuscated
+                };
             } else {
-                console.error("No valid text content found.");
-                return { plainText: null, isObfuscated: false };
+                return { plainText: '', isObfuscated: false };
             }
         } else {
-            console.error(`Failed to fetch metadata. Status: ${response.status}`);
-            return { plainText: null, isObfuscated: false };
+            throw new Error(`Failed to fetch metadata: HTTP ${response.status}`);
         }
     } catch (error) {
-        console.error("Error fetching metadata:", error);
-        return { plainText: null, isObfuscated: false };
+        console.error("Error fetching metadata:", error.message || error);
+        return { plainText: '', isObfuscated: false };
     }
 }
 
