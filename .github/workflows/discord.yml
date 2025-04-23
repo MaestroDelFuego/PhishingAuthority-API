@@ -1,0 +1,35 @@
+# .github/workflows/discord.yml
+name: Notify Discord
+
+on: push
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Discord Embed Notification
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          GITHUB_REPO: ${{ github.repository }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_BRANCH: ${{ github.ref_name }}
+          GITHUB_COMMIT: ${{ github.sha }}
+        run: |
+          curl -H "Content-Type: application/json" \
+          -X POST \
+          -d '{
+            "embeds": [{
+              "title": "New Push to '${GITHUB_REPO}'",
+              "url": "https://github.com/'${GITHUB_REPO}'/commit/'${GITHUB_COMMIT}'",
+              "description": "**'${GITHUB_ACTOR}'** pushed to `'"${GITHUB_BRANCH}"'`",
+              "color": 16753920,
+              "thumbnail": {
+                "url": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
+              },
+              "footer": {
+                "text": "GitHub Actions • '${GITHUB_COMMIT::7}'"
+              },
+              "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+            }]
+          }' \
+          $DISCORD_WEBHOOK
